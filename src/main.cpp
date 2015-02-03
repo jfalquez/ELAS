@@ -186,9 +186,10 @@ int main (int argc, char** argv) {
   image<uchar> *I2 = new image<uchar>(width, height);
 
   // allocate memory for disparity images
-  const int32_t dims[3] = {width,height,width}; // bytes per line = width
-  float* D1_data = (float*)malloc(width*height*sizeof(float));
-  float* D2_data = (float*)malloc(width*height*sizeof(float));
+  int32_t dims[3];
+  dims[0] = width; // bytes per line = width
+  dims[1] = height; // bytes per line = width
+  dims[2] = width; // bytes per line = width
 
   // set up ELAS process
   Elas::parameters param;
@@ -207,8 +208,8 @@ int main (int argc, char** argv) {
     ///----- Main ELAS Code.
 
     // repack images
-    memcpy(imPtr(I1, 0, 0), images->at(0).data(), width * height);
-    memcpy(imPtr(I2, 0, 0), images->at(1).data(), width * height);
+    memcpy(imPtr(I1, 0, 0), images->at(0)->data(), width * height);
+    memcpy(imPtr(I2, 0, 0), images->at(1)->data(), width * height);
 
     // process
     elas.process(I1->data,I2->data,(float*)hDisparity1.data,(float*)hDisparity2.data,dims);
@@ -224,7 +225,8 @@ int main (int argc, char** argv) {
 
     // save depth image
     char            Index[10];
-    sprintf( Index, "%05d", frame );
+    int frame_i = static_cast<int>(frame);
+    sprintf(Index, "%05d", frame_i);
     std::string DepthPrefix = "ELAS-";
     std::string DepthFile;
     DepthFile = DepthPrefix + Index + ".pdm";
@@ -234,7 +236,7 @@ int main (int argc, char** argv) {
     pDFile << hDepth.cols << " " << hDepth.rows << std::endl;
     unsigned int Size = hDepth.elemSize1() * hDepth.rows * hDepth.cols;
     pDFile << 4294967295 << std::endl;
-    pDFile.write( (const char*)hDepth.data, Size );
+    pDFile.write((const char*)hDepth.data, Size);
     pDFile.close();
   }
 
