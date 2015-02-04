@@ -26,6 +26,7 @@ Street, Fifth Floor, Boston, MA 02110-1301, USA
 #include <Eigen/Core>
 #include <HAL/Utils/GetPot>
 #include <HAL/Camera/CameraDevice.h>
+#include <HAL/Camera/Drivers/Rectify/RectifyDriver.h>
 #include <calibu/Calibu.h>
 #include <kangaroo/ImageIntrinsics.h>
 #include <kangaroo/kangaroo.h>
@@ -39,19 +40,19 @@ using namespace std;
 
 inline Sophus::SE3d T_rlFromCamModelRDF(const calibu::CameraModelAndTransform& lcmod, const calibu::CameraModelAndTransform& rcmod, const Eigen::Matrix3d& targetRDF)
 {
-    // Transformation matrix to adjust to target RDF
-    Eigen::Matrix4d Tadj[2] = {Eigen::Matrix4d::Identity(),Eigen::Matrix4d::Identity()};
-    Tadj[0].block<3,3>(0,0) = targetRDF.transpose() * lcmod.camera.RDF();
-    Tadj[1].block<3,3>(0,0) = targetRDF.transpose() * rcmod.camera.RDF();
+  // Transformation matrix to adjust to target RDF
+  Eigen::Matrix4d Tadj[2] = {Eigen::Matrix4d::Identity(),Eigen::Matrix4d::Identity()};
+  Tadj[0].block<3,3>(0,0) = targetRDF.transpose() * lcmod.camera.RDF();
+  Tadj[1].block<3,3>(0,0) = targetRDF.transpose() * rcmod.camera.RDF();
 
-    // Computer Poses in our adjust coordinate system
-    const Eigen::Matrix4d T_lw_ = Tadj[0] * lcmod.T_wc.matrix().inverse();
-    const Eigen::Matrix4d T_rw_ = Tadj[1] * rcmod.T_wc.matrix().inverse();
+  // Computer Poses in our adjust coordinate system
+  const Eigen::Matrix4d T_lw_ = Tadj[0] * lcmod.T_wc.matrix().inverse();
+  const Eigen::Matrix4d T_rw_ = Tadj[1] * rcmod.T_wc.matrix().inverse();
 
-    // Computer transformation to right camera frame from left
-    const Eigen::Matrix4d T_rl = T_rw_ * T_lw_.inverse();
+  // Computer transformation to right camera frame from left
+  const Eigen::Matrix4d T_rl = T_rw_ * T_lw_.inverse();
 
-    return Sophus::SE3d(T_rl.block<3,3>(0,0), T_rl.block<3,1>(0,3) );
+  return Sophus::SE3d(T_rl.block<3,3>(0,0), T_rl.block<3,1>(0,3) );
 }
 
 
@@ -130,25 +131,49 @@ int main (int argc, char** argv) {
 
   GetPot clArgs( argc, argv );
 
-  // Load Camera intrinsics from file
-  const std::string filename = clArgs.follow("","-cmod");
-  if( filename.empty() ) {
-      std::cerr << "Camera models file is required!" << std::endl;
-      exit(1);
-  }
-  const calibu::CameraRig rig = calibu::ReadXmlRig(filename);
+  // Setup camera.
+  hal::Camera camera = hal::Camera(clArgs.follow("", "-cam"));
 
-  if( rig.cameras.size() != 2 ) {
-      std::cerr << "Two camera models are required to run this program!" << std::endl;
-      exit(1);
+  const unsigned int width = camera.Width();
+  const unsigned int height = camera.Height();
+
+
+  // Check if camera is being rectified. If so, use that camera model.
+  // Otherwise, load a camera model from file.
+  // Load Camera intrinsics from file.
+  calibu::CameraRig rig;
+  hal::RectifyDriver *driver_ptr = camera.GetDriver<hal::RectifyDriver>();
+  if (driver_ptr) {
+    std::cerr << "Rectified driver detected. Extracting new camera model." << std::endl;
+    calibu::CameraRig driver_rig;
+    // get camera models from driver
+    calibu::CameraModelGeneric<double> cmod;
+    cmod = driver_ptr->CameraModel();
+    driver_rig.Add(cmod, Sophus::SE3Group<double>());
+    driver_rig.Add(cmod, driver_ptr->T_rl().inverse());
+    rig = driver_rig;
+  } else {
+    const std::string filename = clArgs.follow("","-cmod");
+    if( filename.empty() ) {
+      std::cerr << "Camera models file is required!" << std::endl;
+      exit(EXIT_FAILURE);
+    }
+    rig = calibu::ReadXmlRig(filename);
+  }
+
+
+
+  if (rig.cameras.size() != 2) {
+    std::cerr << "Two camera models are required to run this program!" << std::endl;
+    exit(1);
   }
 
   Eigen::Matrix3f CamModel0 = rig.cameras[0].camera.K().cast<float>();
   Eigen::Matrix3f CamModel1 = rig.cameras[1].camera.K().cast<float>();
 
   roo::ImageIntrinsics camMod[] = {
-      {CamModel0(0,0),CamModel0(1,1),CamModel0(0,2),CamModel0(1,2)},
-      {CamModel1(0,0),CamModel1(1,1),CamModel1(0,2),CamModel1(1,2)}
+    {CamModel0(0,0),CamModel0(1,1),CamModel0(0,2),CamModel0(1,2)},
+    {CamModel1(0,0),CamModel1(1,1),CamModel1(0,2),CamModel1(1,2)}
   };
 
   const Eigen::Matrix3d& Kl = camMod[0][0].Matrix();
@@ -167,11 +192,6 @@ int main (int argc, char** argv) {
   const double baseline = T_rl.translation().norm();
 
   std::cout << "Baseline is: " << baseline << std::endl;
-
-  hal::Camera camera = hal::Camera(clArgs.follow("", "-cam"));
-
-  const unsigned int width = camera.Width();
-  const unsigned int height = camera.Height();
 
   roo::Image<float, roo::TargetDevice, roo::Manage> dDisparity(width, height);
   roo::Image<float, roo::TargetDevice, roo::Manage> dDepth(width, height);
@@ -221,7 +241,7 @@ int main (int argc, char** argv) {
     roo::Disp2Depth(dDisparity, dDepth, Kl(0,0), baseline);
 
     // download depth from GPU
-    dDepth.MemcpyToHost( hDepth.data );
+    dDepth.MemcpyToHost(hDepth.data);
 
     // save depth image
     char            Index[10];
@@ -244,5 +264,3 @@ int main (int argc, char** argv) {
 
   return 0;
 }
-
-
