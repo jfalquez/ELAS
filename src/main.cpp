@@ -131,6 +131,8 @@ int main (int argc, char** argv) {
 
   GetPot clArgs( argc, argv );
 
+  bool export_time = clArgs.search("-export_time");
+
   // Setup camera.
   hal::Camera camera = hal::Camera(clArgs.follow("", "-cam"));
 
@@ -244,12 +246,18 @@ int main (int argc, char** argv) {
     dDepth.MemcpyToHost(hDepth.data);
 
     // save depth image
-    char            Index[10];
-    int frame_i = static_cast<int>(frame);
-    sprintf(Index, "%05d", frame_i);
+    const double    timestamp = images->SystemTime();
+    int             frame_i = static_cast<int>(frame);
+    char            index[30];
+
+    if (export_time) {
+      sprintf(index, "%015.10f", timestamp);
+    } else {
+      sprintf(index, "%05d", frame_i);
+    }
     std::string DepthPrefix = "ELAS-";
     std::string DepthFile;
-    DepthFile = DepthPrefix + Index + ".pdm";
+    DepthFile = DepthPrefix + index + ".pdm";
     std::cout << "Depth File: " << DepthFile << std::endl;
     std::ofstream pDFile( DepthFile.c_str(), std::ios::out | std::ios::binary );
     pDFile << "P7" << std::endl;
@@ -258,6 +266,13 @@ int main (int argc, char** argv) {
     pDFile << 4294967295 << std::endl;
     pDFile.write((const char*)hDepth.data, Size);
     pDFile.close();
+
+    // save grey image
+    std::string GreyPrefix = "Grey-";
+    std::string GreyFile;
+    GreyFile = GreyPrefix + index + ".pgm";
+    std::cout << "Grey File: " << GreyFile << std::endl;
+    cv::imwrite( GreyFile, images->at(0)->Mat() );
   }
 
   cout << "... done!" << endl;
