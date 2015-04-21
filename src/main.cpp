@@ -131,7 +131,8 @@ int main (int argc, char** argv) {
 
   GetPot clArgs( argc, argv );
 
-  bool export_time = clArgs.search("-export_time");
+  int skip_frames   = clArgs.follow(0, "-skip_frames");
+  bool export_time  = clArgs.search("-export_time");
 
   // Setup camera.
   hal::Camera camera = hal::Camera(clArgs.follow("", "-cam"));
@@ -222,7 +223,10 @@ int main (int argc, char** argv) {
 
   for(size_t frame = 0;; ++frame) {
 
-    if(camera.Capture(*images) == false ) {
+    for (int ii = 0; ii < skip_frames; ++ii) {
+      camera.Capture(*images);
+    }
+    if (camera.Capture(*images) == false ) {
       break;
     }
 
